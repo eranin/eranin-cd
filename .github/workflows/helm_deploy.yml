@@ -1,0 +1,76 @@
+name: Helm Deploy to ArgoCD
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+      helm_repo:
+        type: string
+        required: false
+        default: "eranin/eranin-infra"
+
+      values_path:
+        type: string
+        required: true
+
+      image_registry:
+        type: string
+        required: true
+
+      image_name:
+        type: string
+        required: true
+
+      image_tag:
+        type: string
+        required: true
+
+    secrets:
+      INFRA_REPO_TOKEN:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Helm Infra Repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.helm_repo }}
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          fetch-depth: 0
+
+      - name: Prepare image string
+        id: prep
+        run: |
+          IMG="${{ inputs.image_registry }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
+          echo "img=$IMG" >> $GITHUB_OUTPUT
+
+      - name: Update Helm values file
+        run: |
+          FILE="${{ inputs.values_path }}"
+          IMG="${{ steps.prep.outputs.img }}"
+          echo "Updating image: $IMG in $FILE"
+
+          yq -i ".image.repository = \"${{ inputs.image_registry }}/${{ inputs.image_name }}\"" "$FILE"
+          yq -i ".image.tag = \"${{ inputs.image_tag }}\"" "$FILE"
+
+      - name: Commit and push changes
+        run: |
+          git config user.email "cd@eranin.dev"
+          git config user.name "eranin-cd-bot"
+
+          git add .
+          git commit -m "CD: Update ${{ inputs.app_name }} image to ${{ inputs.image_tag }}"
+          git push
+
+      - name: Summary
+        run: |
+          echo "Updated Helm chart to image:"
+          echo "${{ steps.prep.outputs.img }}"
