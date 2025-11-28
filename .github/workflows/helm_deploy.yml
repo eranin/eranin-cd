@@ -54,10 +54,12 @@ jobs:
       # ======================================================
       - name: Install yq
         run: |
-          echo "Installing yq..."
-          sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo mv yq_linux_amd64 /usr/bin/yq
+          sudo curl -L \
+            "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
+            -o /usr/bin/yq
+      
           sudo chmod +x /usr/bin/yq
+          ls -l /usr/bin/yq
           yq --version
 
       # ======================================================
