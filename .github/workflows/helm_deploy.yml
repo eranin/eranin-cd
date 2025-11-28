@@ -6,23 +6,18 @@ on:
       app_name:
         type: string
         required: true
-
       values_path:
         type: string
         required: true
-
       image_name:
         type: string
         required: true
-
       image_tag:
         type: string
         required: true
-
       image_path:
         type: string
         required: true
-
       helm_repo:
         type: string
         required: false
@@ -39,9 +34,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ======================================================
-      # CHECKOUT INFRA REPO
-      # ======================================================
       - name: Checkout Helm Infra Repo
         uses: actions/checkout@v4
         with:
@@ -49,51 +41,40 @@ jobs:
           token: ${{ secrets.INFRA_REPO_TOKEN }}
           fetch-depth: 0
 
-      # ======================================================
-      # INSTALL YQ (CHUẨN 100%)
-      # ======================================================
       - name: Install yq
         run: |
           sudo curl -L \
             "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
             -o /usr/bin/yq
-      
-          sudo chmod +x /usr/bin/yq
-          ls -l /usr/bin/yq
-          yq --version
 
-      # ======================================================
-      # DEBUG INPUTS
-      # ======================================================
+          sudo chmod +x /usr/bin/yq
+          echo "Installed:"
+          ls -l /usr/bin/yq
+          /usr/bin/yq --version
+
       - name: Debug Inputs
         run: |
           echo "Registry: ${{ secrets.IMAGE_REGISTRY }}"
-          echo "Image name: ${{ inputs.image_name }}"
+          echo "Image: ${{ inputs.image_name }}"
           echo "Tag: ${{ inputs.image_tag }}"
-          echo "Values file: ${{ inputs.values_path }}"
-          echo "Key path: ${{ inputs.image_path }}"
+          echo "File: ${{ inputs.values_path }}"
+          echo "Path: ${{ inputs.image_path }}"
 
-      # ======================================================
-      # UPDATE HELM VALUES
-      # ======================================================
       - name: Update Helm values
         run: |
           FILE="${{ inputs.values_path }}"
-          PATH="${{ inputs.image_path }}"
+          PATHKEY="${{ inputs.image_path }}"
 
           echo "Updating: $FILE"
-          echo " → repository: ${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}"
-          echo " → tag: ${{ inputs.image_tag }}"
+          echo " → Repo: ${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}"
+          echo " → Tag:  ${{ inputs.image_tag }}"
 
-          yq -i ".$PATH.repository = \"${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}\"" "$FILE"
-          yq -i ".$PATH.tag = \"${{ inputs.image_tag }}\"" "$FILE"
+          /usr/bin/yq -i ".$PATHKEY.repository = \"${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}\"" "$FILE"
+          /usr/bin/yq -i ".$PATHKEY.tag = \"${{ inputs.image_tag }}\"" "$FILE"
 
-          echo "Updated file:"
+          echo "After update:"
           cat "$FILE"
 
-      # ======================================================
-      # COMMIT & PUSH
-      # ======================================================
       - name: Commit & Push
         run: |
           git config user.email "cd-bot@eranin.dev"
@@ -112,4 +93,3 @@ jobs:
       - name: Summary
         run: |
           echo "CD Updated successfully."
-          echo "Image: ${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
