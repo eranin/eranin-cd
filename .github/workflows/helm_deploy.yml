@@ -6,18 +6,19 @@ on:
       app_name:
         type: string
         required: true
+
       values_path:
         type: string
         required: true
+
       image_name:
         type: string
         required: true
+
       image_tag:
         type: string
         required: true
-      image_path:
-        type: string
-        required: true
+
       helm_repo:
         type: string
         required: false
@@ -34,6 +35,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ======================================
+      # Checkout infra repo
+      # ======================================
       - name: Checkout Helm Infra Repo
         uses: actions/checkout@v4
         with:
@@ -41,6 +46,9 @@ jobs:
           token: ${{ secrets.INFRA_REPO_TOKEN }}
           fetch-depth: 0
 
+      # ======================================
+      # Install YQ
+      # ======================================
       - name: Install yq
         run: |
           sudo curl -L \
@@ -48,48 +56,44 @@ jobs:
             -o /usr/bin/yq
 
           sudo chmod +x /usr/bin/yq
-          echo "Installed:"
-          ls -l /usr/bin/yq
           /usr/bin/yq --version
 
-      - name: Debug Inputs
-        run: |
-          echo "Registry: ${{ secrets.IMAGE_REGISTRY }}"
-          echo "Image: ${{ inputs.image_name }}"
-          echo "Tag: ${{ inputs.image_tag }}"
-          echo "File: ${{ inputs.values_path }}"
-          echo "Path: ${{ inputs.image_path }}"
-
-      - name: Update Helm values
+      # ======================================
+      # Update deployed image version
+      # ======================================
+      - name: Update Helm Values
         run: |
           FILE="${{ inputs.values_path }}"
-          PATHKEY="${{ inputs.image_path }}"
+          REG="${{ secrets.IMAGE_REGISTRY }}"
+          NAME="${{ inputs.image_name }}"
+          TAG="${{ inputs.image_tag }}"
 
           echo "Updating: $FILE"
-          echo " → Repo: ${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}"
-          echo " → Tag:  ${{ inputs.image_tag }}"
 
-          /usr/bin/yq -i ".$PATHKEY.repository = \"${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}\"" "$FILE"
-          /usr/bin/yq -i ".$PATHKEY.tag = \"${{ inputs.image_tag }}\"" "$FILE"
+          /usr/bin/yq -i ".deployment.image.repository = \"${REG}/${NAME}\"" "$FILE"
+          /usr/bin/yq -i ".deployment.image.tag = \"${TAG}\"" "$FILE"
 
-          echo "After update:"
+          echo "Updated file:"
           cat "$FILE"
 
+      # ======================================
+      # Commit & Push
+      # ======================================
       - name: Commit & Push
         run: |
           git config user.email "cd-bot@eranin.dev"
           git config user.name "Eranin-CD-Bot"
-
           git add .
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "Nothing to commit."
             exit 0
           fi
 
-          git commit -m "CD: Update ${{ inputs.app_name }} to tag ${{ inputs.image_tag }}"
+          git commit -m "CD: Update ${{ inputs.app_name }} → ${TAG}"
           git push
 
       - name: Summary
         run: |
-          echo "CD Updated successfully."
+          echo "CD updated image:"
+          echo "${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
