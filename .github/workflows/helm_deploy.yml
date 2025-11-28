@@ -5,30 +5,31 @@ on:
     inputs:
       app_name:
         type: string
-        required: true
+        required: true            # Name of the application (for commit message)
 
       values_path:
         type: string
-        required: true
+        required: true            # Path to Helm values file (inside infra repo)
 
       image_name:
         type: string
-        required: true
+        required: true            # Docker image name (without registry)
 
       image_tag:
         type: string
-        required: true
+        required: true            # Tag returned from CI
 
       helm_repo:
         type: string
         required: false
-        default: "eranin/eranin-infra"
+        default: "eranin/eranin-infra"   # Infra repo that stores all deployments
 
     secrets:
       INFRA_REPO_TOKEN:
-        required: true
+        required: true           # Token with write access to infra repo
+
       IMAGE_REGISTRY:
-        required: true
+        required: true           # Registry host (e.g., 103.162.20.16:5000)
 
 jobs:
   deploy:
@@ -36,19 +37,19 @@ jobs:
 
     steps:
 
-      # ======================================
-      # Checkout infra repo
-      # ======================================
-      - name: Checkout Helm Infra Repo
+      # ------------------------------------------------------------
+      # 1) Checkout infrastructure repository (ArgoCD GitOps repo)
+      # ------------------------------------------------------------
+      - name: Checkout Infra Repo
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.helm_repo }}
           token: ${{ secrets.INFRA_REPO_TOKEN }}
           fetch-depth: 0
 
-      # ======================================
-      # Install YQ
-      # ======================================
+      # ------------------------------------------------------------
+      # 2) Install YQ (safe + deterministic install method)
+      # ------------------------------------------------------------
       - name: Install yq
         run: |
           sudo curl -L \
@@ -56,11 +57,12 @@ jobs:
             -o /usr/bin/yq
 
           sudo chmod +x /usr/bin/yq
+          echo "yq installed version:"
           /usr/bin/yq --version
 
-      # ======================================
-      # Update deployed image version
-      # ======================================
+      # ------------------------------------------------------------
+      # 3) Patch Helm values.yaml with new image repository + tag
+      # ------------------------------------------------------------
       - name: Update Helm Values
         run: |
           FILE="${{ inputs.values_path }}"
@@ -68,32 +70,42 @@ jobs:
           NAME="${{ inputs.image_name }}"
           TAG="${{ inputs.image_tag }}"
 
-          echo "Updating: $FILE"
+          echo "Updating Helm values file: $FILE"
+          echo " -> repository: $REG/$NAME"
+          echo " -> tag:        $TAG"
 
+          # Inject image repo + tag into Helm chart values
           /usr/bin/yq -i ".deployment.image.repository = \"${REG}/${NAME}\"" "$FILE"
           /usr/bin/yq -i ".deployment.image.tag = \"${TAG}\"" "$FILE"
 
-          echo "Updated file:"
+          echo "---- Updated file content ----"
           cat "$FILE"
+          echo "------------------------------"
 
-      # ======================================
-      # Commit & Push
-      # ======================================
+      # ------------------------------------------------------------
+      # 4) Commit & push changes (only if file was modified)
+      # ------------------------------------------------------------
       - name: Commit & Push
         run: |
           git config user.email "cd-bot@eranin.dev"
           git config user.name "Eranin-CD-Bot"
+          
           git add .
 
+          # No commit if file has no changes
           if git diff --cached --quiet; then
-            echo "Nothing to commit."
+            echo "No changes to commit. Deployment skipped."
             exit 0
           fi
 
-          git commit -m "CD: Update ${{ inputs.app_name }} → ${TAG}"
+          git commit -m "CD: Update ${{ inputs.app_name }} → tag ${{ inputs.image_tag }}"
           git push
 
+      # ------------------------------------------------------------
+      # 5) Summary for GitHub Actions UI
+      # ------------------------------------------------------------
       - name: Summary
         run: |
-          echo "CD updated image:"
-          echo "${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
+          echo "CD updated image:" >> $GITHUB_STEP_SUMMARY
+          echo "**${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}**" >> $GITHUB_STEP_SUMMARY
+
