@@ -31,7 +31,6 @@ on:
     secrets:
       INFRA_REPO_TOKEN:
         required: true
-
       IMAGE_REGISTRY:
         required: true
 
@@ -40,8 +39,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Helm Infra Repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.helm_repo }}
           token: ${{ secrets.INFRA_REPO_TOKEN }}
@@ -49,34 +47,24 @@ jobs:
 
       - name: Install yq
         run: |
-          sudo wget -qO /usr/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo wget -qO /usr/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/bin/yq
 
-      - name: Prepare metadata
-        id: prep
+      - name: Debug inputs
         run: |
-          REG="${{ secrets.IMAGE_REGISTRY }}"
-          NAME="${{ inputs.image_name }}"
-          TAG="${{ inputs.image_tag }}"
-
-          FULL="${REG}/${NAME}:${TAG}"
-          echo "full=$FULL" >> $GITHUB_OUTPUT
+          echo "Registry: ${{ secrets.IMAGE_REGISTRY }}"
+          echo "Image: ${{ inputs.image_name }}"
+          echo "Tag: ${{ inputs.image_tag }}"
+          echo "Values file: ${{ inputs.values_path }}"
+          echo "Path: ${{ inputs.image_path }}"
 
       - name: Update Helm values
         run: |
           FILE="${{ inputs.values_path }}"
-          BASE="${{ inputs.image_path }}"
-          REG="${{ secrets.IMAGE_REGISTRY }}"
-          NAME="${{ inputs.image_name }}"
-          TAG="${{ inputs.image_tag }}"
+          PATH="${{ inputs.image_path }}"
 
-          echo "Updating: $FILE"
-          echo " → Path: .$BASE.repository"
-          echo " → Path: .$BASE.tag"
-
-          yq -i ".$BASE.repository = \"${REG}/${NAME}\"" "$FILE"
-          yq -i ".$BASE.tag = \"$TAG\"" "$FILE"
+          yq -i ".$PATH.repository = \"${{ secrets.IMAGE_REGISTRY }}/${{ inputs.image_name }}\"" "$FILE"
+          yq -i ".$PATH.tag = \"${{ inputs.image_tag }}\"" "$FILE"
 
       - name: Commit & Push
         run: |
@@ -84,9 +72,10 @@ jobs:
           git config user.name "Eranin-CD-Bot"
 
           git add .
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+
           git commit -m "CD: Update ${{ inputs.app_name }} to tag ${{ inputs.image_tag }}"
           git push
 
       - name: Summary
-        run: |
-          echo "Updated image → ${{ steps.prep.outputs.full }}"
+        run: echo "CD Updated → Image tag ${{ inputs.image_tag }}"
