@@ -29,7 +29,7 @@ on:
         required: true           # Token with write access to infra repo
 
       IMAGE_REGISTRY:
-        required: true           # Registry host (e.g., 103.162.20.16:5000)
+        required: true           # Registry host
 
 jobs:
   deploy:
