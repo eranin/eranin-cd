@@ -6,9 +6,11 @@ on:
       app_name:
         type: string
         required: true
+
       environment:
         type: string
         required: true
+
       helm_repo:
         type: string
         required: false
@@ -30,6 +32,11 @@ on:
         type: string
         required: true
 
+      image_path:
+        type: string
+        required: false
+        default: "image"
+
     secrets:
       INFRA_REPO_TOKEN:
         required: true
@@ -46,31 +53,42 @@ jobs:
           token: ${{ secrets.INFRA_REPO_TOKEN }}
           fetch-depth: 0
 
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/bin/yq
+
       - name: Prepare image string
         id: prep
         run: |
           IMG="${{ inputs.image_registry }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
           echo "img=$IMG" >> $GITHUB_OUTPUT
 
-      - name: Update Helm values file
+      - name: Update Helm values file dynamically
         run: |
           FILE="${{ inputs.values_path }}"
-          IMG="${{ steps.prep.outputs.img }}"
-          echo "Updating image: $IMG in $FILE"
+          BASE="${{ inputs.image_path }}"                   # e.g. deployment.image
+          REPO="${{ inputs.image_registry }}/${{ inputs.image_name }}"
+          TAG="${{ inputs.image_tag }}"
 
-          yq -i ".image.repository = \"${{ inputs.image_registry }}/${{ inputs.image_name }}\"" "$FILE"
-          yq -i ".image.tag = \"${{ inputs.image_tag }}\"" "$FILE"
+          echo "Updating $FILE at path $BASE to:"
+          echo "  repo = $REPO"
+          echo "  tag  = $TAG"
+
+          # Write repository
+          yq -i ".$BASE.repository = \"$REPO\"" "$FILE"
+
+          # Write tag
+          yq -i ".$BASE.tag = \"$TAG\"" "$FILE"
 
       - name: Commit and push changes
         run: |
           git config user.email "cd@eranin.dev"
           git config user.name "eranin-cd-bot"
-
           git add .
           git commit -m "CD: Update ${{ inputs.app_name }} image to ${{ inputs.image_tag }}"
           git push
 
       - name: Summary
         run: |
-          echo "Updated Helm chart to image:"
-          echo "${{ steps.prep.outputs.img }}"
+          echo "🎉 Updated image to ${{ steps.prep.outputs.img }}"
