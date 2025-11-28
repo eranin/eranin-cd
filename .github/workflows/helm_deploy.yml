@@ -7,20 +7,7 @@ on:
         type: string
         required: true
 
-      environment:
-        type: string
-        required: true
-
-      helm_repo:
-        type: string
-        required: false
-        default: "eranin/eranin-infra"
-
       values_path:
-        type: string
-        required: true
-
-      image_registry:
         type: string
         required: true
 
@@ -34,11 +21,18 @@ on:
 
       image_path:
         type: string
+        required: true
+
+      helm_repo:
+        type: string
         required: false
-        default: "image"
+        default: "eranin/eranin-infra"
 
     secrets:
       INFRA_REPO_TOKEN:
+        required: true
+
+      IMAGE_REGISTRY:
         required: true
 
 jobs:
@@ -55,40 +49,44 @@ jobs:
 
       - name: Install yq
         run: |
-          sudo wget -qO /usr/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo wget -qO /usr/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/bin/yq
 
-      - name: Prepare image string
+      - name: Prepare metadata
         id: prep
         run: |
-          IMG="${{ inputs.image_registry }}/${{ inputs.image_name }}:${{ inputs.image_tag }}"
-          echo "img=$IMG" >> $GITHUB_OUTPUT
-
-      - name: Update Helm values file dynamically
-        run: |
-          FILE="${{ inputs.values_path }}"
-          BASE="${{ inputs.image_path }}"                   # e.g. deployment.image
-          REPO="${{ inputs.image_registry }}/${{ inputs.image_name }}"
+          REG="${{ secrets.IMAGE_REGISTRY }}"
+          NAME="${{ inputs.image_name }}"
           TAG="${{ inputs.image_tag }}"
 
-          echo "Updating $FILE at path $BASE to:"
-          echo "  repo = $REPO"
-          echo "  tag  = $TAG"
+          FULL="${REG}/${NAME}:${TAG}"
+          echo "full=$FULL" >> $GITHUB_OUTPUT
 
-          # Write repository
-          yq -i ".$BASE.repository = \"$REPO\"" "$FILE"
+      - name: Update Helm values
+        run: |
+          FILE="${{ inputs.values_path }}"
+          BASE="${{ inputs.image_path }}"
+          REG="${{ secrets.IMAGE_REGISTRY }}"
+          NAME="${{ inputs.image_name }}"
+          TAG="${{ inputs.image_tag }}"
 
-          # Write tag
+          echo "Updating: $FILE"
+          echo " → Path: .$BASE.repository"
+          echo " → Path: .$BASE.tag"
+
+          yq -i ".$BASE.repository = \"${REG}/${NAME}\"" "$FILE"
           yq -i ".$BASE.tag = \"$TAG\"" "$FILE"
 
-      - name: Commit and push changes
+      - name: Commit & Push
         run: |
-          git config user.email "cd@eranin.dev"
-          git config user.name "eranin-cd-bot"
+          git config user.email "cd-bot@eranin.dev"
+          git config user.name "Eranin-CD-Bot"
+
           git add .
-          git commit -m "CD: Update ${{ inputs.app_name }} image to ${{ inputs.image_tag }}"
+          git commit -m "CD: Update ${{ inputs.app_name }} to tag ${{ inputs.image_tag }}"
           git push
 
       - name: Summary
         run: |
-          echo "🎉 Updated image to ${{ steps.prep.outputs.img }}"
+          echo "Updated image → ${{ steps.prep.outputs.full }}"
