@@ -24,6 +24,20 @@ on:
         required: false
         default: "eranin/eranin-infra"   # Infra repo that stores all deployments
 
+      # Ceiling for the deploy job. This one runs on ubuntu-latest, so a hang
+      # burns hosted minutes rather than holding our shared self-hosted node —
+      # lower stakes than the eranin-ci jobs, but still worth bounding.
+      #
+      # Measured across 160 successful deploys in 7 caller repos: median 7s,
+      # p90 9s, slowest 13s. The job only rewrites one values file and pushes.
+      # 10 minutes is far above anything observed while still leaving room for
+      # the push retry/backoff loop, whose unreachable-remote path gives up in
+      # about a minute. See ERA-207.
+      timeout_minutes:
+        description: Ceiling for the deploy job.
+        type: number
+        default: 10
+
     secrets:
       INFRA_REPO_TOKEN:
         required: true           # Token with write access to infra repo
@@ -34,6 +48,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
 
     steps:
 
