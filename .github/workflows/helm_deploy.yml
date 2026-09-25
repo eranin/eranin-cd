@@ -101,7 +101,60 @@ jobs:
           fi
 
           git commit -m "CD: Update ${{ inputs.app_name }} → tag ${{ inputs.image_tag }}"
-          git push
+
+          # Every app's CD job writes this one shared infra repo, so a bare push
+          # has two ways to lose a race it did nothing wrong to deserve:
+          #
+          #   1. Two deploys finishing together. A repo whose workflow builds a
+          #      frontend and a backend runs both deploy jobs in parallel; they
+          #      commit to the same branch and the slower push is rejected as
+          #      non-fast-forward.
+          #   2. GitHub returning a transient 500. Observed on stj-website run
+          #      36013387906 (2026-09-24): "remote: Internal Server Error" and
+          #      "! [remote rejected] main -> main", with the commit created
+          #      locally just fine.
+          #
+          # Both surface on this single line and both turn a good build into a
+          # red customer-facing pipeline, so retry instead of failing. Rebasing
+          # is safe here because this job's only commit touches the one values
+          # file named by inputs.values_path, which no other job writes.
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin "$BRANCH"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 5 ]; then
+              break
+            fi
+
+            # Back off a little further each time: a concurrent push clears in
+            # seconds, a GitHub blip can take longer.
+            echo "Push failed (attempt ${attempt}/5). Syncing with origin/${BRANCH} and retrying..."
+            sleep $(( attempt * 5 ))
+
+            # Fetch and rebase are kept apart so the failure message names the
+            # real problem. A fetch that fails is the remote being unreachable
+            # — the same transient class as the push itself, so keep retrying.
+            if ! git fetch origin "$BRANCH"; then
+              echo "Could not reach origin to sync (attempt ${attempt}/5)."
+              continue
+            fi
+
+            if ! git rebase "origin/${BRANCH}"; then
+              # A conflict means something else rewrote the very values this job
+              # is updating. That is not a race to retry through — leave the
+              # tree clean, stop, and let a human look rather than force over it.
+              git rebase --abort || true
+              echo "::error::Rebase onto origin/${BRANCH} conflicted — another commit changed the same values file this job updates. Refusing to force. Deployment not pushed."
+              exit 1
+            fi
+          done
+
+          echo "::error::Could not push to ${{ inputs.helm_repo }} after 5 attempts. Deployment not pushed."
+          exit 1
 
       # ------------------------------------------------------------
       # 5) Summary for GitHub Actions UI
