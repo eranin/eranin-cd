@@ -47,7 +47,10 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Self-hosted: GitHub-hosted minutes are capped by the org Actions budget
+    # ($10, stop-on-limit). Once it is spent every hosted job is refused before
+    # it starts, which halted every deploy on 2026-09-29.
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: ${{ inputs.timeout_minutes }}
 
     steps:
@@ -56,7 +59,7 @@ jobs:
       # 1) Checkout infrastructure repository (ArgoCD GitOps repo)
       # ------------------------------------------------------------
       # v5 = the Node 24 runtime (v4 targets Node 20 and now warns). Needs runner
-      # >= 2.327.1; this job is on GitHub-hosted ubuntu-latest. Inputs unchanged.
+      # >= 2.327.1; this job runs on the self-hosted runner. Inputs unchanged.
       - name: Checkout Infra Repo
         uses: actions/checkout@v5
         with:
@@ -69,13 +72,17 @@ jobs:
       # ------------------------------------------------------------
       - name: Install yq
         run: |
-          sudo curl -L \
-            "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
-            -o /usr/bin/yq
-
-          sudo chmod +x /usr/bin/yq
-          echo "yq installed version:"
-          /usr/bin/yq --version
+          # The self-hosted runner has no passwordless sudo, so install into a
+          # job-local bin dir rather than /usr/bin. Reuse a host copy if present.
+          if command -v yq >/dev/null 2>&1 && yq --version | grep -q mikefarah; then
+            echo "yq already present: $(yq --version)"
+          else
+            mkdir -p "$RUNNER_TEMP/bin"
+            curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" -o "$RUNNER_TEMP/bin/yq"
+            chmod +x "$RUNNER_TEMP/bin/yq"
+            echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+            "$RUNNER_TEMP/bin/yq" --version
+          fi
 
       # ------------------------------------------------------------
       # 3) Patch Helm values.yaml with new image repository + tag
@@ -92,8 +99,8 @@ jobs:
           echo " -> tag:        $TAG"
 
           # Inject image repo + tag into Helm chart values
-          /usr/bin/yq -i ".deployment.image.repository = \"${REG}/${NAME}\"" "$FILE"
-          /usr/bin/yq -i ".deployment.image.tag = \"${TAG}\"" "$FILE"
+          yq -i ".deployment.image.repository = \"${REG}/${NAME}\"" "$FILE"
+          yq -i ".deployment.image.tag = \"${TAG}\"" "$FILE"
 
           echo "---- Updated file content ----"
           cat "$FILE"
